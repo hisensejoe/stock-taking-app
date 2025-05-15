@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# extras
+backup-temp/
+clean-build.bat
+build.ps1
+clean-build.ps1
+passwor_reset_email.html
+registration_email.html
+package-lock.json
+pnpm-lock.yaml
