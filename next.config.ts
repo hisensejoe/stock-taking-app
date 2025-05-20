@@ -9,22 +9,22 @@ const nextConfig: NextConfig = {
     ignoreDuringBuilds: true, // This will ignore all ESLint errors during build
   },
   
-  // Add bundle analyzer in development mode, but only when not using Turbopack
-  webpack: !usingTurbopack ? (config, { dev, isServer }) => {
-    // Add bundle analyzer only in dev mode and not on the server
-    if (dev && !isServer) {
-      const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer');
-      config.plugins.push(
-        new BundleAnalyzerPlugin({
-          analyzerMode: 'server',
-          analyzerPort: 8888,
-          openAnalyzer: false,
-        })
-      );
-    }
+  // // Add bundle analyzer in development mode, but only when not using Turbopack
+  // webpack: !usingTurbopack ? (config, { dev, isServer }) => {
+  //   // Add bundle analyzer only in dev mode and not on the server
+  //   if (dev && !isServer) {
+  //     const { BundleAnalyzerPlugin } = require('webpack-bundle-analyzer');
+  //     config.plugins.push(
+  //       new BundleAnalyzerPlugin({
+  //         analyzerMode: 'server',
+  //         analyzerPort: 8888,
+  //         openAnalyzer: false,
+  //       })
+  //     );
+  //   }
     
-    return config;
-  } : undefined,
+  //   return config;
+  // } : undefined,
   
   // Optimize image handling
   images: {
