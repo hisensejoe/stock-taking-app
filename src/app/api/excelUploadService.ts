@@ -1,23 +1,31 @@
 // excelUploadService.ts - A utility service for Excel file upload operations
-import * as XLSX from 'xlsx';
 import { Product } from './productService';
+
+// Dynamically import XLSX only when needed
+const getXLSX = async () => {
+  const XLSX = await import('xlsx');
+  return XLSX;
+};
 
 /**
  * Parse an Excel file and convert it to an array of product objects
  * @param file The Excel file to parse
  * @returns An array of product objects
  */
-export const parseExcelFile = (file: File): Promise<Partial<Product>[]> => {
-    return new Promise((resolve, reject) => {
+export const parseExcelFile = async (file: File): Promise<Partial<Product>[]> => {
+    return new Promise(async (resolve, reject) => {
         const reader = new FileReader();
         
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
             try {
                 const data = e.target?.result;
                 if (!data) {
                     reject(new Error('Failed to read file'));
                     return;
                 }
+                
+                // Dynamically import XLSX
+                const XLSX = await getXLSX();
                 
                 // Parse the Excel file
                 const workbook = XLSX.read(data, { type: 'binary' });
@@ -28,18 +36,22 @@ export const parseExcelFile = (file: File): Promise<Partial<Product>[]> => {
                 const jsonData = XLSX.utils.sheet_to_json(worksheet);
                 
                 // Map Excel columns to product properties
-                const products = jsonData.map((row: any) => {
+                const products = jsonData.map((row: unknown) => {
+                    const typedRow = row as Record<string, unknown>;
                     return {
-                        code: row['Code'] || row['code'] || '',
-                        name: row['Name'] || row['name'] || '',
-                        barcode: row['Barcode'] || row['barcode'] || '',
-                        serialized: row['Serialized'] === 'Yes' || row['serialized'] === true || false
+                        code: (typedRow['Code'] || typedRow['code'] || '') as string,
+                        name: (typedRow['Name'] || typedRow['name'] || '') as string,
+                        barcode: (typedRow['Barcode'] || typedRow['barcode'] || '') as string,
+                        serialized: typedRow['Serialized'] === 'Yes' || typedRow['serialized'] === true || false
                     };
                 });
                 
                 resolve(products);
             } catch (error) {
-                console.error('Error parsing Excel file:', error);
+                console.error('Error parsing Excel file:', {
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    timestamp: new Date().toISOString()
+                });
                 reject(new Error(`Failed to parse Excel file: ${error instanceof Error ? error.message : 'Unknown error'}`));
             }
         };
@@ -48,70 +60,94 @@ export const parseExcelFile = (file: File): Promise<Partial<Product>[]> => {
             reject(new Error('Failed to read file'));
         };
         
-        // Read the file as binary
         reader.readAsBinaryString(file);
     });
 };
 
 /**
- * Parse an Excel file and return the products with enhanced error handling
+ * Parse an Excel file and return the products with enhanced error handling and validation
  * @param file The Excel file to parse
- * @returns Array of products from the Excel file
+ * @returns An array of product objects with validation results
  */
 export const parseExcelFileEnhanced = async (file: File): Promise<Partial<Product>[]> => {
     try {
+        // Dynamically import XLSX
+        const XLSX = await getXLSX();
+        
         // Read the file as an array buffer
         const arrayBuffer = await file.arrayBuffer();
         
         // Parse the Excel file
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        
-        // Get the first sheet
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         
-        // Convert to JSON
-        const data = XLSX.utils.sheet_to_json<any>(worksheet);
+        // Convert to JSON with headers
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
         
-        // Map the data to products
-        const products: Partial<Product>[] = data.map((row) => {
-            // Handle different possible column names (case insensitive)
-            const code = row.Code || row.code || row.CODE || '';
-            const name = row.Name || row.name || row.NAME || '';
-            const barcode = row.Barcode || row.barcode || row.BARCODE || '';
+        // Extract headers (first row)
+        const headers = jsonData[0] as string[];
+        const requiredHeaders = ['Code', 'Name'];
+        
+        // Validate headers
+        const missingHeaders = requiredHeaders.filter(
+            required => !headers.some(header => 
+                typeof header === 'string' && header.toLowerCase() === required.toLowerCase()
+            )
+        );
+        
+        if (missingHeaders.length > 0) {
+            throw new Error(`Missing required headers: ${missingHeaders.join(', ')}`);
+        }
+        
+        // Find column indices
+        const getColumnIndex = (name: string): number => {
+            return headers.findIndex(header => 
+                typeof header === 'string' && header.toLowerCase() === name.toLowerCase()
+            );
+        };
+        
+        const codeIndex = getColumnIndex('code');
+        const nameIndex = getColumnIndex('name');
+        const barcodeIndex = getColumnIndex('barcode');
+        const serializedIndex = getColumnIndex('serialized');
+        
+        // Map rows to products (skip header row)
+        const products: Partial<Product>[] = [];
+        for (let i = 1; i < jsonData.length; i++) {
+            const row = jsonData[i] as unknown[];
             
-            // Handle serialized field (can be "Yes"/"No", "TRUE"/"FALSE", true/false, 1/0)
-            let serialized = false;
-            const serializedValue = row.Serialized || row.serialized || row.SERIALIZED;
-            if (serializedValue !== undefined) {
-                if (typeof serializedValue === 'boolean') {
-                    serialized = serializedValue;
-                } else if (typeof serializedValue === 'number') {
-                    serialized = serializedValue === 1;
-                } else if (typeof serializedValue === 'string') {
-                    const value = serializedValue.toLowerCase();
-                    serialized = value === 'yes' || value === 'true' || value === '1';
-                }
+            // Skip empty rows
+            if (!row.length || (row.length === 1 && !row[0])) continue;
+            
+            const product: Partial<Product> = {};
+            
+            if (codeIndex >= 0 && row[codeIndex] !== undefined) {
+                product.code = String(row[codeIndex]);
             }
             
-            return {
-                code,
-                name,
-                barcode,
-                serialized
-            };
-        });
+            if (nameIndex >= 0 && row[nameIndex] !== undefined) {
+                product.name = String(row[nameIndex]);
+            }
+            
+            if (barcodeIndex >= 0 && row[barcodeIndex] !== undefined) {
+                product.barcode = String(row[barcodeIndex]);
+            }
+            
+            if (serializedIndex >= 0) {
+                const value = row[serializedIndex];
+                product.serialized = value === 'Yes' || value === true || value === 1;
+            } else {
+                product.serialized = true; // Default value
+            }
+            
+            products.push(product);
+        }
         
         return products;
     } catch (error) {
-        console.error('Error parsing Excel file', {
-            fileName: file.name,
-            fileSize: file.size,
-            error: error instanceof Error ? error.message : 'Unknown error',
-            timestamp: new Date().toISOString()
-        });
-        
-        throw new Error('Failed to parse Excel file');
+        console.error('Error parsing Excel file:', error);
+        throw new Error(`Failed to parse Excel file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 };
 
@@ -122,12 +158,25 @@ export const parseExcelFileEnhanced = async (file: File): Promise<Partial<Produc
  */
 export const getProductCountFromExcel = async (file: File): Promise<number> => {
     try {
+        // Dynamically import XLSX
+        const XLSX = await getXLSX();
+        
+        // Read the file as an array buffer
+        const arrayBuffer = await file.arrayBuffer();
+        
         // Parse the Excel file
-        const products = await parseExcelFileEnhanced(file);
-        return products.length;
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        
+        // Convert to JSON with headers
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+        
+        // Count non-empty rows (excluding header)
+        return jsonData.slice(1).filter(row => row && Array.isArray(row) && row.length > 0).length;
     } catch (error) {
         console.error('Error counting products in Excel file:', error);
-        throw error;
+        throw new Error(`Failed to count products: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 };
 
@@ -142,6 +191,9 @@ export const uploadProducts = async (
     onProgress?: (progress: number) => void
 ): Promise<Partial<Product>[]> => {
     try {
+        // Dynamically import XLSX
+        const XLSX = await getXLSX();
+        
         // Log the upload attempt
         console.info(`Attempting to upload ${products.length} products from Excel at ${new Date().toISOString()}`);
         
@@ -188,7 +240,7 @@ export const uploadExcelFile = async (
     file: File,
     onProgress?: (progress: number) => void
 ): Promise<Product[]> => {
-    const token = sessionStorage.getItem('accessToken');
+    const token = localStorage.getItem('accessToken');
     
     if (!token) {
         const error = new Error('Authentication token not found');
@@ -201,6 +253,9 @@ export const uploadExcelFile = async (
     }
     
     try {
+        // Dynamically import XLSX
+        const XLSX = await getXLSX();
+        
         // Log the upload attempt with detailed information
         console.info('Excel upload attempt', {
             fileName: file.name,
@@ -224,7 +279,7 @@ export const uploadExcelFile = async (
         }
         
         // Send the request to the API
-        const response = await fetch('http://stock.hisense.com.gh/api/v1.0/products/upload', {
+        const response = await fetch('https://stock.hisense.com.gh/api/v1.0/products/upload', {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`
@@ -245,12 +300,16 @@ export const uploadExcelFile = async (
                 const errorData = await response.json();
                 errorMessage = errorData.message || `Error ${response.status}: ${response.statusText}`;
                 errorDetails = errorData;
-            } catch (e) {
+            } catch {
                 errorMessage = `Error ${response.status}: ${response.statusText}`;
             }
             
             // Create a detailed error object
             const error = new Error(errorMessage);
+            const enhancedError = error as unknown as Record<string, unknown>;
+            enhancedError.status = response.status;
+            enhancedError.details = errorDetails;
+            enhancedError.fileName = file.name;
             
             // Log the error with context
             console.error('Excel upload API error', {
@@ -263,7 +322,7 @@ export const uploadExcelFile = async (
                 timestamp: new Date().toISOString()
             });
             
-            throw error;
+            throw enhancedError;
         }
         
         const data = await response.json();
@@ -284,15 +343,19 @@ export const uploadExcelFile = async (
         return data;
     } catch (error) {
         // Create an enhanced error with context
-        const enhancedError = error instanceof Error ? error : new Error('Unknown error during Excel upload');
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error during Excel upload';
+        const enhancedError = new Error(errorMessage) as unknown as Record<string, unknown>;
+        enhancedError.fileName = file.name;
+        enhancedError.fileSize = file.size;
+        enhancedError.fileType = file.type;
         
         // Log the error with detailed context
         console.error('Excel file upload error', {
             fileName: file.name,
             fileSize: file.size,
             fileType: file.type,
-            error: enhancedError.message,
-            stack: enhancedError.stack,
+            error: errorMessage,
+            stack: error instanceof Error ? error.stack : undefined,
             timestamp: new Date().toISOString()
         });
         

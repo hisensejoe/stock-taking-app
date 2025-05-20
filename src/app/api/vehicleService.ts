@@ -19,13 +19,13 @@ interface VehicleSearchResponse {
     totalElements: number;
 }
 
-const API_BASE_URL = 'http://stock.hisense.com.gh/api/v1.0';
+const API_BASE_URL = 'https://stock.hisense.com.gh/api/v1.0';
 
 /**
  * Get the authentication token from session storage
  */
 const getToken = (): string | null => {
-    return sessionStorage.getItem('accessToken');
+    return localStorage.getItem('accessToken');
 };
 
 /**
@@ -42,10 +42,12 @@ const getHeaders = (): HeadersInit => {
 /**
  * Log API errors with detailed information
  */
-const logApiError = (method: string, endpoint: string, error: any, additionalInfo?: any) => {
+const logApiError = (method: string, endpoint: string, error: unknown, additionalInfo?: Record<string, unknown>) => {
     console.error(`API Error [${method} ${endpoint}]:`, {
-        message: error.message || 'Unknown error',
-        status: error.status,
+        message: error instanceof Error ? error.message : 'Unknown error',
+        status: error instanceof Error && 'status' in error ? 
+            (error as Record<string, unknown>).status : 
+            undefined,
         additionalInfo,
         timestamp: new Date().toISOString()
     });
@@ -57,24 +59,26 @@ const logApiError = (method: string, endpoint: string, error: any, additionalInf
 const handleResponse = async <T>(response: Response, method: string, endpoint: string): Promise<T> => {
     if (!response.ok) {
         let errorMessage = 'Unknown error occurred';
-        let errorData = null;
+        let errorData: unknown = null;
         
         try {
             // Try to parse error response as JSON
             errorData = await response.json();
-            errorMessage = errorData.message || `Error ${response.status}: ${response.statusText}`;
-        } catch (e) {
+            errorMessage = errorData && typeof errorData === 'object' && 'message' in errorData 
+                ? String(errorData.message) 
+                : `Error ${response.status}: ${response.statusText}`;
+        } catch (e) { // eslint-disable-line @typescript-eslint/no-unused-vars
             // If not JSON, get text
             try {
                 errorMessage = await response.text();
-            } catch (textError) {
+            } catch (_textError) { // eslint-disable-line @typescript-eslint/no-unused-vars
                 errorMessage = `Error ${response.status}: ${response.statusText}`;
             }
         }
         
         const error = new Error(errorMessage);
-        (error as any).status = response.status;
-        (error as any).data = errorData;
+        (error as Error & { status: number; data: unknown }).status = response.status;
+        (error as Error & { status: number; data: unknown }).data = errorData;
         
         logApiError(method, endpoint, error, { status: response.status });
         throw error;
@@ -206,10 +210,41 @@ export const deleteVehicle = async (id: number): Promise<void> => {
         });
         
         if (!response.ok) {
-            await handleResponse<any>(response, 'DELETE', endpoint);
+            await handleResponse<void>(response, 'DELETE', endpoint);
         }
     } catch (error) {
         logApiError('DELETE', endpoint, error, { vehicleId: id });
+        throw error;
+    }
+};
+
+/**
+ * Upload vehicles from a file
+ */
+export const uploadVehicles = async (file: File): Promise<any> => {
+    const token = getToken();
+    const endpoint = '/vehicles/upload';
+    
+    if (!token) {
+        throw new Error('Authentication token is missing');
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method: 'POST',
+            headers: {
+                'accept': '*/*',
+                'Authorization': `Bearer ${token}`
+            },
+            body: formData
+        });
+        
+        return handleResponse<any>(response, 'POST', endpoint);
+    } catch (error) {
+        logApiError('POST', endpoint, error, { file: file.name });
         throw error;
     }
 };

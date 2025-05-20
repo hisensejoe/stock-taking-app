@@ -22,13 +22,14 @@ interface ProductSearchResponse {
     totalElements: number;
 }
 
-const API_BASE_URL = 'http://stock.hisense.com.gh/api/v1.0';
+// Make sure the API base URL is correct
+const API_BASE_URL = 'https://stock.hisense.com.gh/api/v1.0';
 
 /**
  * Get the authentication token from session storage
  */
 const getToken = (): string | null => {
-    return sessionStorage.getItem('accessToken');
+    return localStorage.getItem('accessToken');
 };
 
 /**
@@ -45,10 +46,15 @@ const getHeaders = (): HeadersInit => {
 /**
  * Log API errors with detailed information
  */
-const logApiError = (method: string, endpoint: string, error: any, additionalInfo?: any) => {
+const logApiError = (
+    method: string, 
+    endpoint: string, 
+    error: Record<string, unknown>, 
+    additionalInfo?: Record<string, unknown>
+) => {
     console.error(`API Error [${method} ${endpoint}]:`, {
         message: error.message || 'Unknown error',
-        status: error.status,
+        status: 'status' in error ? error.status : undefined,
         additionalInfo,
         timestamp: new Date().toISOString()
     });
@@ -58,36 +64,61 @@ const logApiError = (method: string, endpoint: string, error: any, additionalInf
  * Handle API response and error
  */
 const handleResponse = async <T>(response: Response, method: string, endpoint: string): Promise<T> => {
+    // Log the raw response for debugging
+    console.log(`API Response [${method} ${endpoint}]:`, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries([...response.headers.entries()]),
+        url: response.url
+    });
+    
     if (!response.ok) {
         let errorMessage = 'Unknown error occurred';
         let errorData = null;
         
         try {
             // Try to parse error response as JSON
-            errorData = await response.json();
-            errorMessage = errorData.message || `Error ${response.status}: ${response.statusText}`;
-        } catch (e) {
-            // If not JSON, get text
+            const responseText = await response.text();
+            console.log(`Error response text:`, responseText);
+            
             try {
-                errorMessage = await response.text();
-            } catch (textError) {
-                errorMessage = `Error ${response.status}: ${response.statusText}`;
+                errorData = JSON.parse(responseText);
+                errorMessage = errorData.message || `Error ${response.status}: ${response.statusText}`;
+            } catch (parseError) {
+                // If not valid JSON, use the text directly
+                errorMessage = responseText || `Error ${response.status}: ${response.statusText}`;
             }
+        } catch {
+            errorMessage = `Error ${response.status}: ${response.statusText}`;
         }
         
         const error = new Error(errorMessage);
-        (error as any).status = response.status;
-        (error as any).data = errorData;
+        // Add custom properties to the error object
+        const enhancedError = error as unknown as Record<string, unknown>;
+        enhancedError.status = response.status;
+        enhancedError.data = errorData;
         
-        logApiError(method, endpoint, error, { status: response.status });
-        throw error;
+        logApiError(method, endpoint, enhancedError, { status: response.status });
+        throw enhancedError;
     }
     
     try {
-        return await response.json() as T;
+        const responseText = await response.text();
+        console.log(`Success response text:`, responseText);
+        
+        if (!responseText.trim()) {
+            console.warn(`Empty response received from [${method} ${endpoint}]`);
+            return {} as T;
+        }
+        
+        return JSON.parse(responseText) as T;
     } catch (error) {
-        logApiError(method, endpoint, error, { message: 'Failed to parse JSON response' });
-        throw new Error('Failed to parse server response');
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
+        logApiError(method, endpoint, enhancedError, { message: 'Failed to parse JSON response' });
+        throw enhancedError;
     }
 };
 
@@ -103,21 +134,23 @@ const handleResponseWithPossibleNoContent = async <T>(response: Response, method
             // Try to parse error response as JSON
             errorData = await response.json();
             errorMessage = errorData.message || `Error ${response.status}: ${response.statusText}`;
-        } catch (e) {
+        } catch {
             // If not JSON, get text
             try {
                 errorMessage = await response.text();
-            } catch (textError) {
+            } catch {
                 errorMessage = `Error ${response.status}: ${response.statusText}`;
             }
         }
         
         const error = new Error(errorMessage);
-        (error as any).status = response.status;
-        (error as any).data = errorData;
+        // Add custom properties to the error object
+        const enhancedError = error as unknown as Record<string, unknown>;
+        enhancedError.status = response.status;
+        enhancedError.data = errorData;
         
-        logApiError(method, endpoint, error, { status: response.status });
-        throw error;
+        logApiError(method, endpoint, enhancedError, { status: response.status });
+        throw enhancedError;
     }
     
     // For 204 No Content responses, return null
@@ -129,13 +162,17 @@ const handleResponseWithPossibleNoContent = async <T>(response: Response, method
     try {
         return await response.json() as T;
     } catch (error) {
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
         // For DELETE operations, it's common to get no content even with 200 status
         if (method === 'DELETE') {
             return null;
         }
         
-        logApiError(method, endpoint, error, { message: 'Failed to parse JSON response' });
-        throw new Error('Failed to parse server response');
+        logApiError(method, endpoint, enhancedError, { message: 'Failed to parse JSON response' });
+        throw enhancedError;
     }
 };
 
@@ -147,9 +184,12 @@ export const searchProducts = async (params: ProductSearchParams = {}): Promise<
     const token = getToken();
     
     if (!token) {
-        const error = new Error('Authentication token not found');
-        logApiError('POST', '/products/search', error);
-        throw error;
+        const errorMessage = 'Authentication token not found';
+        const error = new Error(errorMessage);
+        const enhancedError = error as unknown as Record<string, unknown>;
+        
+        logApiError('POST', '/products/search', enhancedError, { params });
+        throw enhancedError;
     }
     
     try {
@@ -164,11 +204,19 @@ export const searchProducts = async (params: ProductSearchParams = {}): Promise<
         
         return handleResponse<ProductSearchResponse>(response, 'POST', '/products/search');
     } catch (error) {
-        if (!(error instanceof Error && (error as any).status)) {
-            // Only log network or other errors not already logged by handleResponse
-            logApiError('POST', '/products/search', error, { params });
-        }
-        throw error;
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
+        logApiError('POST', '/products/search', enhancedError, {
+            page,
+            size,
+            sort,
+            sortField,
+            timestamp: new Date().toISOString()
+        });
+        
+        throw enhancedError;
     }
 };
 
@@ -180,9 +228,12 @@ export const getProduct = async (id: number): Promise<Product> => {
     const endpoint = `/products/${id}`;
     
     if (!token) {
-        const error = new Error('Authentication token not found');
-        logApiError('GET', endpoint, error);
-        throw error;
+        const errorMessage = 'Authentication token not found';
+        const error = new Error(errorMessage);
+        const enhancedError = error as unknown as Record<string, unknown>;
+        
+        logApiError('GET', endpoint, enhancedError);
+        throw enhancedError;
     }
     
     try {
@@ -193,10 +244,16 @@ export const getProduct = async (id: number): Promise<Product> => {
         
         return handleResponse<Product>(response, 'GET', endpoint);
     } catch (error) {
-        if (!(error instanceof Error && (error as any).status)) {
-            logApiError('GET', endpoint, error);
-        }
-        throw error;
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
+        logApiError('GET', endpoint, enhancedError, {
+            productId: id,
+            timestamp: new Date().toISOString()
+        });
+        
+        throw enhancedError;
     }
 };
 
@@ -208,24 +265,45 @@ export const createProduct = async (product: Product): Promise<Product> => {
     const endpoint = '/products';
     
     if (!token) {
-        const error = new Error('Authentication token not found');
-        logApiError('POST', endpoint, error);
-        throw error;
+        const errorMessage = 'Authentication token not found';
+        const error = new Error(errorMessage);
+        const enhancedError = error as unknown as Record<string, unknown>;
+        
+        logApiError('POST', endpoint, enhancedError);
+        throw enhancedError;
     }
     
     try {
+        // Log the request payload for debugging
+        console.log('Creating product with payload:', JSON.stringify(product, null, 2));
+        
+        // Ensure all required fields are present and have the correct types
+        const validatedProduct = {
+            code: product.code || '',
+            name: product.name || '',
+            barcode: product.barcode || '',
+            serialized: Boolean(product.serialized),
+            ...(product.imageUrl ? { imageUrl: product.imageUrl } : {})
+        };
+        
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
             method: 'POST',
             headers: getHeaders(),
-            body: JSON.stringify(product)
+            body: JSON.stringify(validatedProduct)
         });
         
         return handleResponse<Product>(response, 'POST', endpoint);
     } catch (error) {
-        if (!(error instanceof Error && (error as any).status)) {
-            logApiError('POST', endpoint, error, { productData: product });
-        }
-        throw error;
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
+        logApiError('POST', endpoint, enhancedError, {
+            productData: product,
+            timestamp: new Date().toISOString()
+        });
+        
+        throw enhancedError;
     }
 };
 
@@ -237,9 +315,12 @@ export const updateProduct = async (id: number, product: Product): Promise<Produ
     const endpoint = `/products/${id}`;
     
     if (!token) {
-        const error = new Error('Authentication token not found');
-        logApiError('PUT', endpoint, error);
-        throw error;
+        const errorMessage = 'Authentication token not found';
+        const error = new Error(errorMessage);
+        const enhancedError = error as unknown as Record<string, unknown>;
+        
+        logApiError('PUT', endpoint, enhancedError);
+        throw enhancedError;
     }
     
     try {
@@ -251,10 +332,17 @@ export const updateProduct = async (id: number, product: Product): Promise<Produ
         
         return handleResponse<Product>(response, 'PUT', endpoint);
     } catch (error) {
-        if (!(error instanceof Error && (error as any).status)) {
-            logApiError('PUT', endpoint, error, { productData: product });
-        }
-        throw error;
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
+        logApiError('PUT', endpoint, enhancedError, {
+            productId: id,
+            productData: product,
+            timestamp: new Date().toISOString()
+        });
+        
+        throw enhancedError;
     }
 };
 
@@ -266,9 +354,12 @@ export const deleteProduct = async (id: number): Promise<void> => {
     const endpoint = `/products/${id}`;
     
     if (!token) {
-        const error = new Error('Authentication token not found');
-        logApiError('DELETE', endpoint, error);
-        throw error;
+        const errorMessage = 'Authentication token not found';
+        const error = new Error(errorMessage);
+        const enhancedError = error as unknown as Record<string, unknown>;
+        
+        logApiError('DELETE', endpoint, enhancedError);
+        throw enhancedError;
     }
     
     try {
@@ -286,27 +377,15 @@ export const deleteProduct = async (id: number): Promise<void> => {
         // Log successful deletion
         console.info(`Successfully deleted product with ID: ${id} at ${new Date().toISOString()}`);
     } catch (error) {
-        // Enhance error with additional context
-        const enhancedError = error instanceof Error 
-            ? error 
-            : new Error('Unknown error during product deletion');
-            
-        if (!(enhancedError as any).status) {
-            (enhancedError as any).status = 500;
-        }
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
         
-        // Add operation context to the error
-        (enhancedError as any).operation = 'deleteProduct';
-        (enhancedError as any).productId = id;
-        
-        // Log the error with detailed information
-        logApiError('DELETE', endpoint, enhancedError, { 
+        logApiError('DELETE', endpoint, enhancedError, {
             productId: id,
-            timestamp: new Date().toISOString(),
-            attemptDetails: 'Product deletion operation failed'
+            timestamp: new Date().toISOString()
         });
         
-        // Rethrow with enhanced information
         throw enhancedError;
     }
 };
@@ -317,10 +396,15 @@ export const deleteProduct = async (id: number): Promise<void> => {
  * @returns Array of created products
  */
 export const createBatchProducts = async (products: Partial<Product>[]): Promise<Product[]> => {
-    const token = sessionStorage.getItem('accessToken');
+    const token = localStorage.getItem('accessToken');
     
     if (!token) {
-        throw new Error('Authentication token not found');
+        const errorMessage = 'Authentication token not found';
+        const error = new Error(errorMessage);
+        const enhancedError = error as unknown as Record<string, unknown>;
+        
+        logApiError('POST', '/products/batch', enhancedError);
+        throw enhancedError;
     }
     
     try {
@@ -328,7 +412,7 @@ export const createBatchProducts = async (products: Partial<Product>[]): Promise
         console.info(`Attempting to create ${products.length} products in batch at ${new Date().toISOString()}`);
         
         // Send the request to the API
-        const response = await fetch('http://stock.hisense.com.gh/api/v1.0/products/batch', {
+        const response = await fetch(`${API_BASE_URL}/products/batch`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -343,11 +427,20 @@ export const createBatchProducts = async (products: Partial<Product>[]): Promise
             try {
                 const errorData = await response.json();
                 errorMessage = errorData.message || `Error ${response.status}: ${response.statusText}`;
-            } catch (e) {
+            } catch {
                 errorMessage = `Error ${response.status}: ${response.statusText}`;
             }
             
-            throw new Error(errorMessage);
+            const error = new Error(errorMessage);
+            const enhancedError = error as unknown as Record<string, unknown>;
+            enhancedError.status = response.status;
+            
+            logApiError('POST', '/products/batch', enhancedError, {
+                productsCount: products.length,
+                timestamp: new Date().toISOString()
+            });
+            
+            throw enhancedError;
         }
         
         const data = await response.json();
@@ -357,13 +450,61 @@ export const createBatchProducts = async (products: Partial<Product>[]): Promise
         
         return data;
     } catch (error) {
-        // Log the error
-        console.error('Product batch creation error:', {
+        const enhancedError = (error instanceof Error ? 
+            { ...error, message: error.message } : 
+            error) as Record<string, unknown>;
+        
+        logApiError('POST', '/products/batch', enhancedError, {
             productsCount: products.length,
-            error: error instanceof Error ? error.message : 'Unknown error',
             timestamp: new Date().toISOString()
         });
         
-        throw error;
+        throw enhancedError;
     }
+};
+
+/**
+ * Get all products
+ * @returns Promise with product search response
+ */
+export const getProducts = async (): Promise<{items: Product[], total: number}> => {
+  // Retry mechanism
+  const maxRetries = 3;
+  let retryCount = 0;
+  let lastError;
+
+  while (retryCount < maxRetries) {
+    try {
+      const response = await searchProducts({
+        page: 0,
+        size: 500, // Increased to get more products
+        sort: 'ASC',
+        sortField: 'name'
+      });
+      
+      console.log(`Loaded ${response.content?.length || 0} products`);
+      
+      return {
+        items: response.content || [],
+        total: response.totalElements || 0
+      };
+    } catch (error) {
+      lastError = error;
+      retryCount++;
+      
+      // Log the error but only throw after all retries fail
+      console.warn(`Product fetch failed (attempt ${retryCount}/${maxRetries}):`, error);
+      
+      if (retryCount < maxRetries) {
+        // Exponential backoff: wait longer between each retry
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 10000);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        console.log(`Retrying product fetch (attempt ${retryCount + 1}/${maxRetries})...`);
+      }
+    }
+  }
+  
+  // If we've exhausted all retries, log the error and throw
+  logApiError('GET', '/products', lastError);
+  throw lastError;
 };

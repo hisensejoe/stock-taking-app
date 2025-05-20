@@ -1,45 +1,75 @@
 'use client';
 import Link from 'next/link';
-import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import { loginUser } from './utils/auth'; // Assuming you have an auth utility
 
 export default function Home() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    try {
+      const response = await loginUser(email, password);
+      
+      // Check if user has default password
+      if (response.user.defaultPassword) {
+        // Redirect to password reset page
+        router.push('/reset-password');
+        return;
+      }
+
+      // Normal login flow
+      router.push('/dashboard');
+    } catch (err) {
+      setError('Login failed. Please check your credentials.');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500">
       <nav className="bg-transparent p-4">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="text-white text-2xl font-bold">Warehouse Management</div>
+          <div className="text-white text-2xl font-bold">Inventory Management System (IMS)</div>
+          <div className="flex items-center space-x-4">
           <Link
-            href="/login"
-            className="bg-white text-indigo-600 px-6 py-2 rounded-full font-semibold hover:bg-indigo-50 transition-colors duration-200"
-          >
-            Login
-          </Link>
+                  href="/login"
+                  className="inline-block bg-white text-indigo-600 px-8 py-3 rounded-full font-semibold hover:bg-indigo-50 transition-colors duration-200"
+                >
+                  Login
+                </Link>
+          </div>
         </div>
       </nav>
+
+      {error && (
+        <div className="text-center text-red-500 mt-4">
+          {error}
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="py-20 sm:py-24 lg:py-32">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div>
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
-                Smart Warehouse Management System
+                Inventory Management System (IMS)
               </h1>
               <p className="text-lg sm:text-xl text-white/90 mb-8">
                 Streamline your inventory, manage products, and track users all in one place.
-                Experience the future of warehouse management today.
+                Experience the future of inventory management today.
               </p>
               <div className="space-x-4">
                 <Link
                   href="/login"
                   className="inline-block bg-white text-indigo-600 px-8 py-3 rounded-full font-semibold hover:bg-indigo-50 transition-colors duration-200"
                 >
-                  Get Started
-                </Link>
-                <Link
-                  href="#features"
-                  className="inline-block border-2 border-white text-white px-8 py-3 rounded-full font-semibold hover:bg-white/10 transition-colors duration-200"
-                >
-                  Learn More
+                  Login
                 </Link>
               </div>
             </div>
@@ -66,48 +96,13 @@ export default function Home() {
           </div>
         </div>
 
-        <section id="features" className="py-20">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-bold text-white mb-4">
-              Powerful Features
-            </h2>
-            <p className="text-white/80 max-w-2xl mx-auto">
-              Everything you need to manage your warehouse efficiently
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                title: 'Inventory Management',
-                description: 'Track stock levels and manage products with ease',
-              },
-              {
-                title: 'User Administration',
-                description: 'Manage access levels and user permissions securely',
-              },
-              {
-                title: 'Analytics Dashboard',
-                description: 'Get insights with real-time analytics and reporting',
-              },
-            ].map((feature, index) => (
-              <div
-                key={index}
-                className="bg-white/10 backdrop-blur-lg rounded-xl p-6 hover:bg-white/20 transition-colors duration-200"
-              >
-                <h3 className="text-xl font-semibold text-white mb-3">
-                  {feature.title}
-                </h3>
-                <p className="text-white/70">{feature.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
+      
       </main>
 
       <footer className="bg-white/10 backdrop-blur-lg mt-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <div className="text-center text-white/70">
-            <p> 2025 Warehouse Management System. All rights reserved.</p>
+            <p> 2025 Inventory management system (IMS). All rights reserved.</p>
           </div>
         </div>
       </footer>

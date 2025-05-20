@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface User {
   id: number;
@@ -32,7 +32,7 @@ interface ApiResponse {
   timestamp: string;
   message: string;
   debugMessage: string | null;
-  subErrors: any | null;
+  subErrors: Record<string, unknown> | null;
 }
 
 interface PaginatedResponse {
@@ -79,25 +79,37 @@ export default function Users() {
   });
 
   // Only include fields required for the API payload
-  const [newUser, setNewUser] = useState({
+  const [newUser, setNewUser] = useState<{
+    firstName: string;
+    lastName: string;
+    email: string;
+    phoneNumber: string;
+    role: string;
+    warehouseId: number;
+  }>({
     firstName: '',
     lastName: '',
     email: '',
     phoneNumber: '',
-    password: '',
-    confirmPassword: '', // Not sent to API but needed for validation
+    role: 'USER', // Default role
     warehouseId: 0
   });
 
   // Edit user state
-  const [editUser, setEditUser] = useState({
+  const [editUser, setEditUser] = useState<{
+    id: number;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phoneNumber: string;
+    role: string;
+    warehouseId: number;
+  }>({
     id: 0,
     firstName: '',
     lastName: '',
     email: '',
     phoneNumber: '',
-    password: '',
-    confirmPassword: '',
     role: '',
     warehouseId: 0
   });
@@ -139,23 +151,14 @@ export default function Users() {
     return errorMessage;
   };
 
-  useEffect(() => {
-    const storedToken = sessionStorage.getItem('accessToken');
-    setToken(storedToken);
-
-    // Fetch users when component mounts
-    fetchUsers();
-    // Fetch warehouses when component mounts
-    fetchWarehouses();
-  }, []);
-
-  const fetchUsers = async (page = 0) => {
+  // Define fetchUsers and fetchWarehouses functions before using them in useEffect
+  const fetchUsers = useCallback(async (page = 0) => {
     console.log(`Starting user fetching process for page ${page}`);
     setIsLoadingUsers(true);
     setUsersFetchError(null);
 
     try {
-      const storedToken = sessionStorage.getItem('accessToken');
+      const storedToken = localStorage.getItem('accessToken');
       if (!storedToken) {
         console.warn('No access token found for user API request');
       }
@@ -173,7 +176,7 @@ export default function Users() {
 
       console.log('Sending user search payload:', payload);
 
-      const response = await fetch('http://stock.hisense.com.gh/api/v1.0/users/search', {
+      const response = await fetch('https://stock.hisense.com.gh/api/v1.0/users/search', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -239,15 +242,14 @@ export default function Users() {
       setIsLoadingUsers(false);
       console.log('User fetching process completed');
     }
-  };
+  }, []);
 
-  const fetchWarehouses = async () => {
-    console.log('Starting warehouse fetching process');
+  const fetchWarehouses = useCallback(async () => {
     setIsLoadingWarehouses(true);
     setWarehousesFetchError(null);
 
     try {
-      const storedToken = sessionStorage.getItem('accessToken');
+      const storedToken = localStorage.getItem('accessToken');
       if (!storedToken) {
         console.warn('No access token found for warehouse API request');
       }
@@ -265,7 +267,7 @@ export default function Users() {
 
       console.log('Sending warehouse search payload:', payload);
 
-      const response = await fetch('http://stock.hisense.com.gh/api/v1.0/warehouses/search', {
+      const response = await fetch('https://stock.hisense.com.gh/api/v1.0/warehouses/search?page=0&size=100&sort=ASC&sortField=id', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -378,7 +380,17 @@ export default function Users() {
       setIsLoadingWarehouses(false);
       console.log('Warehouse fetching process completed');
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem('accessToken');
+    setToken(storedToken);
+
+    // Fetch users when component mounts
+    fetchUsers();
+    // Fetch warehouses when component mounts
+    fetchWarehouses();
+  }, [fetchUsers, fetchWarehouses]);
 
   // Function to handle page change
   const handlePageChange = (page: number) => {
@@ -392,117 +404,16 @@ export default function Users() {
   };
 
   const validateForm = () => {
-    console.log('Validating user form:', { 
-      firstName: newUser.firstName, 
-      lastName: newUser.lastName,
-      email: newUser.email,
-      phoneNumber: newUser.phoneNumber,
-      hasPassword: !!newUser.password,
-      passwordLength: newUser.password?.length || 0,
-      passwordsMatch: newUser.password === newUser.confirmPassword,
-      warehouseId: newUser.warehouseId
-    });
-
-    if (!newUser.firstName) return 'First name is required';
-    if (!newUser.lastName) return 'Last name is required';
+    // Remove password validation
+    if (!newUser.firstName) return 'First Name is required';
+    if (!newUser.lastName) return 'Last Name is required';
     if (!newUser.email) return 'Email is required';
-    if (!newUser.phoneNumber) return 'Phone number is required';
-    if (!newUser.password) return 'Password is required';
-    if (newUser.password !== newUser.confirmPassword) return 'Passwords do not match';
-    if (newUser.password.length < 8) return 'Password must be at least 8 characters';
+    if (!newUser.phoneNumber) return 'Phone Number is required';
+    if (!newUser.role) return 'Role is required';
+    if (!newUser.warehouseId) return 'Warehouse is required';
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(newUser.email)) return 'Invalid email format';
-
-    // Basic phone number validation for Ghana
-    const phoneRegex = /^0[2-5][0-9]{8}$/;
-    if (!phoneRegex.test(newUser.phoneNumber)) return 'Invalid phone number format';
-
-    console.log('Form validation successful');
+    // Optional password validation removed
     return null;
-  };
-
-  const handleAddUser = async () => {
-    console.log('Starting user creation process');
-
-    // Validate form
-    const validationError = validateForm();
-    if (validationError) {
-      console.error('Form validation failed:', validationError);
-      setApiError(validationError);
-      return;
-    }
-
-    setIsLoading(true);
-    setApiError(null);
-
-    try {
-      // Prepare payload with only the required fields for the API
-      const payload = {
-        firstName: newUser.firstName,
-        lastName: newUser.lastName,
-        email: newUser.email,
-        phoneNumber: newUser.phoneNumber,
-        password: newUser.password,
-        warehouseId: newUser.warehouseId
-      };
-
-      console.log('Sending user creation payload:', {
-        ...payload,
-        password: '[REDACTED]', // Don't log actual password
-        warehouseDetails: warehouses.find(w => w.id === payload.warehouseId)
-      });
-
-      // Make API call to the specified endpoint for user creation with warehouse
-      const response = await fetch('http://stock.hisense.com.gh/api/v1.0/users/warehouse', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : ''
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const data: ApiResponse = await response.json();
-      console.log('User creation API response status:', response.status, response.statusText);
-
-      if (response.ok) {
-        console.log('User created successfully:', {
-          status: data.status,
-          message: data.message
-        });
-
-        // Success - close modal and refresh user list
-        setShowAddModal(false);
-        resetForm();
-
-        // Show success message
-        alert('User created successfully!');
-
-        // Refresh the user list
-        fetchUsers(pagination.number);
-      } else {
-        // Handle API error
-        console.error('API Error during user creation:', {
-          status: response.status,
-          statusText: response.statusText,
-          apiResponse: data
-        });
-
-        // Use the utility function to format the error message
-        setApiError(formatApiError(data));
-      }
-    } catch (error) {
-      // Log the full error details
-      console.error('Exception during user creation:', error);
-
-      // Provide a user-friendly error message
-      setApiError('An unexpected error occurred. Please try again.');
-    } finally {
-      setIsLoading(false);
-      console.log('User creation process completed');
-    }
   };
 
   const resetForm = () => {
@@ -511,8 +422,7 @@ export default function Users() {
       lastName: '',
       email: '',
       phoneNumber: '',
-      password: '',
-      confirmPassword: '',
+      role: 'USER',
       warehouseId: warehouses.length > 0 ? warehouses[0].id : 0
     });
     setApiError(null);
@@ -525,15 +435,15 @@ export default function Users() {
     setDeleteError(null);
 
     try {
-      const storedToken = sessionStorage.getItem('accessToken');
+      const storedToken = localStorage.getItem('accessToken');
       if (!storedToken) {
         console.warn('No access token found for user deletion API request');
         throw new Error('Authentication token is missing');
       }
 
-      console.log(`Sending DELETE request to: http://stock.hisense.com.gh/api/v1.0/users/${userId}`);
+      console.log(`Sending DELETE request to: https://stock.hisense.com.gh/api/v1.0/users/${userId}`);
 
-      const response = await fetch(`http://stock.hisense.com.gh/api/v1.0/users/${userId}`, {
+      const response = await fetch(`https://stock.hisense.com.gh/api/v1.0/users/${userId}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -616,15 +526,15 @@ export default function Users() {
     setEditApiError(null);
 
     try {
-      const storedToken = sessionStorage.getItem('accessToken');
+      const storedToken = localStorage.getItem('accessToken');
       if (!storedToken) {
         console.warn('No access token found for user fetch API request');
         throw new Error('Authentication token is missing');
       }
 
-      console.log(`Sending GET request to: http://stock.hisense.com.gh/api/v1.0/users/${userId}`);
+      console.log(`Sending GET request to: https://stock.hisense.com.gh/api/v1.0/users/${userId}`);
 
-      const response = await fetch(`http://stock.hisense.com.gh/api/v1.0/users/${userId}`, {
+      const response = await fetch(`https://stock.hisense.com.gh/api/v1.0/users/${userId}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -670,8 +580,6 @@ export default function Users() {
         lastName: userData.lastName || '',
         email: userData.email || '',
         phoneNumber: userData.phoneNumber || '',
-        password: '',
-        confirmPassword: '',
         role: userData.role || '',
         warehouseId: userData.warehouse?.id || 0
       });
@@ -709,35 +617,36 @@ export default function Users() {
     setEditApiError(null);
 
     try {
-      const storedToken = sessionStorage.getItem('accessToken');
+      const storedToken = localStorage.getItem('accessToken');
       if (!storedToken) {
         console.warn('No access token found for user update API request');
         throw new Error('Authentication token is missing');
       }
 
       // Prepare payload with only the required fields for the API
-      const payload: any = {
+      const payload: {
+        firstName: string;
+        lastName: string;
+        email: string;
+        phoneNumber: string;
+        role: string;
+        warehouseId: number;
+      } = {
         firstName: editUser.firstName,
         lastName: editUser.lastName,
         email: editUser.email,
         phoneNumber: editUser.phoneNumber,
-        warehouseId: editUser.warehouseId,
-        role: editUser.role
+        role: editUser.role,
+        warehouseId: editUser.warehouseId
       };
-
-      // Only include password if it was changed
-      if (editUser.password) {
-        payload.password = editUser.password;
-      }
 
       console.log('Sending user update payload:', {
         ...payload,
-        password: payload.password ? '[REDACTED]' : undefined, // Don't log actual password
         warehouseDetails: warehouses.find(w => w.id === payload.warehouseId)
       });
 
       // Make API call to update the user
-      const response = await fetch(`http://stock.hisense.com.gh/api/v1.0/users/${editUser.id}`, {
+      const response = await fetch(`https://stock.hisense.com.gh/api/v1.0/users/${editUser.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -790,37 +699,14 @@ export default function Users() {
 
   // Function to validate edit form
   const validateEditForm = () => {
-    console.log('Validating edit user form:', { 
-      firstName: editUser.firstName, 
-      lastName: editUser.lastName,
-      email: editUser.email,
-      phoneNumber: editUser.phoneNumber,
-      hasPassword: !!editUser.password,
-      passwordLength: editUser.password?.length || 0,
-      passwordsMatch: editUser.password === editUser.confirmPassword,
-      warehouseId: editUser.warehouseId
-    });
-
-    if (!editUser.firstName) return 'First name is required';
-    if (!editUser.lastName) return 'Last name is required';
+    // Remove password validation
+    if (!editUser.firstName) return 'First Name is required';
+    if (!editUser.lastName) return 'Last Name is required';
     if (!editUser.email) return 'Email is required';
-    if (!editUser.phoneNumber) return 'Phone number is required';
+    if (!editUser.phoneNumber) return 'Phone Number is required';
+    if (!editUser.role) return 'Role is required';
 
-    // Only validate password if it's being changed
-    if (editUser.password) {
-      if (editUser.password.length < 8) return 'Password must be at least 8 characters';
-      if (editUser.password !== editUser.confirmPassword) return 'Passwords do not match';
-    }
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(editUser.email)) return 'Invalid email format';
-
-    // Basic phone number validation for Ghana
-    const phoneRegex = /^0[2-5][0-9]{8}$/;
-    if (!phoneRegex.test(editUser.phoneNumber)) return 'Invalid phone number format';
-
-    console.log('Edit form validation successful');
+    // Optional password validation removed
     return null;
   };
 
@@ -832,8 +718,6 @@ export default function Users() {
       lastName: '',
       email: '',
       phoneNumber: '',
-      password: '',
-      confirmPassword: '',
       role: '',
       warehouseId: 0
     });
@@ -845,6 +729,95 @@ export default function Users() {
     console.log('Opening edit form for user ID:', userId);
     setUserToEdit(userId);
     fetchUserForEdit(userId);
+  };
+
+  const handleAddUser = async () => {
+    console.log('Starting user creation process');
+
+    // Validate form
+    const validationError = validateForm();
+    if (validationError) {
+      console.error('Form validation failed:', validationError);
+      setIsLoading(false);
+      setApiError(validationError);
+      return;
+    }
+
+    setIsLoading(true);
+    setApiError(null);
+
+    try {
+      // Prepare payload with only the required fields for the API
+      const payload: {
+        firstName: string;
+        lastName: string;
+        email: string;
+        phoneNumber: string;
+        role: string;
+        warehouseId: number;
+      } = {
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+        email: newUser.email,
+        phoneNumber: newUser.phoneNumber,
+        role: newUser.role,
+        warehouseId: newUser.warehouseId
+      };
+
+      console.log('Sending user creation payload:', {
+        ...payload,
+        warehouseDetails: warehouses.find(w => w.id === payload.warehouseId)
+      });
+
+      // Make API call to the specified endpoint for user creation
+      const response = await fetch('https://stock.hisense.com.gh/api/v1.0/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : ''
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data: ApiResponse = await response.json();
+      console.log('User creation API response status:', response.status, response.statusText);
+
+      if (response.ok) {
+        console.log('User created successfully:', {
+          status: data.status,
+          message: data.message
+        });
+
+        // Success - close modal and refresh user list
+        setShowAddModal(false);
+        resetForm();
+
+        // Show success message
+        alert('User created successfully!');
+
+        // Refresh the user list
+        fetchUsers(pagination.number);
+      } else {
+        // Handle API error
+        console.error('API Error during user creation:', {
+          status: response.status,
+          statusText: response.statusText,
+          apiResponse: data
+        });
+
+        // Use the utility function to format the error message
+        setApiError(formatApiError(data));
+      }
+    } catch (error) {
+      // Log the full error details
+      console.error('Exception during user creation:', error);
+
+      // Provide a user-friendly error message
+      setApiError('An unexpected error occurred. Please try again.');
+    } finally {
+      setIsLoading(false);
+      console.log('User creation process completed');
+    }
   };
 
   return (
@@ -1135,7 +1108,7 @@ export default function Users() {
           <div className="relative mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <div className="mt-3 text-center">
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
-                <svg className="h-6 w-6 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="h-6 w-6 text-red-600" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
@@ -1185,7 +1158,7 @@ export default function Users() {
 
       {/* Add User Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-gray-900">Add New User</h2>
@@ -1272,6 +1245,22 @@ export default function Users() {
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Role*
+                </label>
+                <select
+                  value={newUser.role}
+                  onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-base text-gray-900"
+                  required
+                >
+                  <option value="">Select Role</option>
+                  <option value="SUPER_ADMIN">Super Admin</option>
+                  <option value="WAREHOUSE_USER">Warehouse User</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Warehouse*
                 </label>
                 {isLoadingWarehouses ? (
@@ -1307,34 +1296,6 @@ export default function Users() {
                   </div>
                 )}
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password*
-                </label>
-                <input
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-base text-gray-900"
-                  placeholder="********"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Confirm Password*
-                </label>
-                <input
-                  type="password"
-                  value={newUser.confirmPassword}
-                  onChange={(e) => setNewUser({ ...newUser, confirmPassword: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-base text-gray-900"
-                  placeholder="********"
-                  required
-                />
-              </div>
             </div>
             
             <div className="mt-6 flex justify-end space-x-3">
@@ -1367,7 +1328,7 @@ export default function Users() {
       
       {/* Edit User Modal */}
       {showEditModal && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex items-center justify-center">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-gray-900">Edit User</h2>
@@ -1504,32 +1465,6 @@ export default function Users() {
                     </button>
                   </div>
                 )}
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  New Password (leave blank to keep current)
-                </label>
-                <input
-                  type="password"
-                  value={editUser.password}
-                  onChange={(e) => setEditUser({ ...editUser, password: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-base text-gray-900"
-                  placeholder="********"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Confirm New Password
-                </label>
-                <input
-                  type="password"
-                  value={editUser.confirmPassword}
-                  onChange={(e) => setEditUser({ ...editUser, confirmPassword: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 text-base text-gray-900"
-                  placeholder="********"
-                />
               </div>
             </div>
             

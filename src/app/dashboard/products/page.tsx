@@ -1,10 +1,28 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
-import AddProduct from './AddProduct'; // Importing the AddProduct component
-import EditProduct from './EditProduct'; // Importing the EditProduct component
-import ExcelUpload from './ExcelUpload'; // Importing the ExcelUpload component
-import DownloadTemplate from './DownloadTemplate'; // Importing the DownloadTemplate component
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import { searchProducts, deleteProduct, Product } from '../../api/productService';
+import dynamic from 'next/dynamic';
+
+// Dynamically import components with loading fallbacks
+const AddProduct = dynamic(() => import('./AddProduct'), {
+  loading: () => <div className="p-4 border rounded shadow-sm">Loading add product form...</div>,
+  ssr: false
+});
+
+const EditProduct = dynamic(() => import('./EditProduct'), {
+  loading: () => <div className="p-4 border rounded shadow-sm">Loading edit form...</div>,
+  ssr: false
+});
+
+const ExcelUpload = dynamic(() => import('./ExcelUpload'), {
+  loading: () => <div className="p-4 border rounded shadow-sm">Loading Excel upload...</div>,
+  ssr: false
+});
+
+const DownloadTemplate = dynamic(() => import('./DownloadTemplate'), {
+  loading: () => <div className="p-2 border rounded">Loading template...</div>,
+  ssr: false
+});
 
 // Use the Product interface from productService but ensure id is required
 interface ProductWithRequiredId extends Omit<Product, 'id'> {
@@ -29,10 +47,12 @@ const Products = () => {
     const [sort, setSort] = useState<string>('ASC');
     const [sortField, setSortField] = useState<string>('name');
     const [totalPages, setTotalPages] = useState<number>(0);
-    const [totalElements, setTotalElements] = useState<number>(0);
+    // Total elements used for internal calculations
+    const [_totalElements, setTotalElements] = useState<number>(0); // eslint-disable-line @typescript-eslint/no-unused-vars
+    // Kept for potential future use in pagination calculations
 
     useEffect(() => {
-        const storedToken = sessionStorage.getItem('accessToken');
+        const storedToken = localStorage.getItem('accessToken');
         setToken(storedToken);
         if (!storedToken) {
             window.location.href = '/login';
@@ -150,31 +170,29 @@ const Products = () => {
                         : 'bg-green-500 hover:bg-green-600'} text-white font-semibold py-2 px-4 rounded-md`}
                     disabled={isUploading}
                 >
-                    {isUploading ? 'Upload in Progress...' : 'Excel Upload'}
+                    {isUploading ? 'Upload in Progress...' : 'Upload'}
                 </button>
-                <DownloadTemplate 
-                    variant="button" 
-                    className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 rounded-md" 
-                />
             </div>
-            <AddProduct 
-                isOpen={isModalOpen} 
-                onClose={() => setIsModalOpen(false)} 
-                onProductAdded={handleProductAdded} 
-            />
-            <EditProduct
-                isOpen={isEditModalOpen}
-                onClose={() => setIsEditModalOpen(false)}
-                productId={selectedProductId}
-                onProductUpdated={handleProductUpdated}
-            />
-            <ExcelUpload
-                isOpen={isExcelUploadModalOpen}
-                onClose={() => setIsExcelUploadModalOpen(false)}
-                onProductsUploaded={handleProductsUploaded}
-                onUploadStart={handleUploadStart}
-                onUploadError={handleUploadError}
-            />
+            <Suspense fallback={<div>Loading...</div>}>
+                <AddProduct 
+                    isOpen={isModalOpen} 
+                    onClose={() => setIsModalOpen(false)} 
+                    onProductAdded={handleProductAdded} 
+                />
+                <EditProduct
+                    isOpen={isEditModalOpen}
+                    onClose={() => setIsEditModalOpen(false)}
+                    productId={selectedProductId}
+                    onProductUpdated={handleProductUpdated}
+                />
+                <ExcelUpload
+                    isOpen={isExcelUploadModalOpen}
+                    onClose={() => setIsExcelUploadModalOpen(false)}
+                    onProductsUploaded={handleProductsUploaded}
+                    onUploadStart={handleUploadStart}
+                    onUploadError={handleUploadError}
+                />
+            </Suspense>
             <div className="flex space-x-4 mb-4">
                 <div>
                     <label htmlFor="size" className="border rounded p-1 text-black">Size:</label>
@@ -281,7 +299,7 @@ const Products = () => {
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                         <button 
                                             onClick={() => handleEdit(product.id)} 
-                                            className="text-blue-500 hover:text-blue-700 mr-2"
+                                            className="text-indigo-500 hover:text-indigo-700 mr-2"
                                             disabled={deletingProductIds.includes(product.id)}
                                         >
                                             Edit
